@@ -19,4 +19,4 @@ conda init
 conda create -n MLCOURSE python=3.9
 conda activate MLCOURSE
 ```
-### Step 2: Copy ret_sample.csv from FIAM folder to project data folder
+### Step 3: Copy ret_sample.csv from FIAM folder to project data folder
