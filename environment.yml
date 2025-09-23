@@ -1,11 +1,16 @@
 name: MLCOURSE
 channels:
+  - pytorch
+  - nvidia
   - conda-forge
   - defaults
 dependencies:
   - python=3.9
   - pandas=1.4.2
-  - pytorch=1.10.2
+  - pytorch=2.6
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=11.8 # ✅ CUDA support for your RTX 3070
   - scikit-learn=1.0.2
   - seaborn=0.11.2
   - tqdm=4.64.0
@@ -13,6 +18,8 @@ dependencies:
   - ta=0.10.1
   - graphviz=2.50.0
   - xgboost=1.5.0
+  - nltk
+  - transformers
   - pip
   - pip:
       - gym==0.24.0
@@ -25,6 +32,5 @@ dependencies:
       - kneed==0.7.0
       - hmmlearn==0.2.7
       - pyhhmm==2.0.1
-      - ta==0.10.1
       - polars==1.33.1
       - pyarrow==21.0.0
