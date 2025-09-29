@@ -6,9 +6,9 @@ from statsmodels.tsa.stattools import coint
 def pairs_trade_monthly_with_risk(prices1, prices2, label1, label2,
                                   entry=2.0, exit=0.5, lookback=6,
                                   capital=100,
-                                  max_holding=6,            # months
-                                  stop_loss_pct=0.04,       # exit if loss > 10% of capital
-                                  coint_pval_threshold=0.10 # if pval > this, abandon pair
+                                  max_holding=6,
+                                  stop_loss_pct=0.04,
+                                  coint_pval_threshold=0.10
                                  ):
     """
     Monthly pairs backtest with rules for non-converging trades.
@@ -21,11 +21,13 @@ def pairs_trade_monthly_with_risk(prices1, prices2, label1, label2,
         raise ValueError("Not enough data for lookback")
 
     trades = []
-    position = 0              # -1 short spread, +1 long spread, 0 flat
+    position = 0
     entry_spread = None
     entry_date = None
     entry_sigma = None
     entry_index = None
+    entry_shares1 = None  # ADD THIS
+    entry_shares2 = None  # ADD THIS
     holding = 0
 
     # Pre-allocate columns
@@ -35,7 +37,6 @@ def pairs_trade_monthly_with_risk(prices1, prices2, label1, label2,
     df['pnl_unrealized'] = 0.0
 
     for t in range(lookback, n):
-        # Use history up to t-1 (no lookahead)
         hist = df.iloc[:t]
         y = hist['p1']
         x = hist['p2']
@@ -54,7 +55,6 @@ def pairs_trade_monthly_with_risk(prices1, prices2, label1, label2,
         reason = None
         pnl_dollars = 0.0
 
-        # If we currently have no position -> maybe enter
         if position == 0:
             if z_t > entry:
                 position = -1
@@ -63,6 +63,8 @@ def pairs_trade_monthly_with_risk(prices1, prices2, label1, label2,
                 entry_date = date_t
                 entry_index = t
                 holding = 0
+                entry_shares1 = -capital / df['p1'].iat[t]           # STORE
+                entry_shares2 = +beta * capital / df['p2'].iat[t]    # STORE
                 df.at[date_t, 'action'] = 'ENTER_SHORT'
             elif z_t < -entry:
                 position = +1
@@ -71,27 +73,24 @@ def pairs_trade_monthly_with_risk(prices1, prices2, label1, label2,
                 entry_date = date_t
                 entry_index = t
                 holding = 0
+                entry_shares1 = +capital / df['p1'].iat[t]           # STORE
+                entry_shares2 = -beta * capital / df['p2'].iat[t]    # STORE
                 df.at[date_t, 'action'] = 'ENTER_LONG'
             else:
                 df.at[date_t, 'action'] = 'HOLD'
         else:
-            # We are in a trade: compute mark-to-market PnL for monitoring
-            # pnl in spread units:
-            pnl_spread_units = (spread_t - entry_spread) * position
-            # convert to dollars by scaling with capital and entry_sigma
-            pnl_dollars = (pnl_spread_units / entry_sigma) * capital
+            # Use stored shares
+            pnl_dollars = entry_shares1 * (df['p1'].iat[t] - df['p1'].iat[entry_index]) \
+                        + entry_shares2 * (df['p2'].iat[t] - df['p2'].iat[entry_index])
+
             df.at[date_t, 'pnl_unrealized'] = pnl_dollars
 
             holding += 1
 
-            # exit conditions (in priority order)
-            # 1) normal exit (z moved back inside exit band)
             if abs(z_t) < exit:
                 reason = 'z_cross'
-            # 2) stop-loss: loss exceeds stop_loss_pct * capital
             elif pnl_dollars < -stop_loss_pct * capital:
                 reason = 'stop_loss'
-            # 3) max holding exceeded
             elif holding >= max_holding:
                 reason = 'max_holding'
             else:
@@ -100,7 +99,6 @@ def pairs_trade_monthly_with_risk(prices1, prices2, label1, label2,
             if reason is not None:
                 exit_spread = spread_t
                 exit_date = date_t
-                # compute final pnl_dollars (already computed above)
                 trades.append({
                     'entry_date': entry_date,
                     'exit_date': exit_date,
@@ -111,12 +109,13 @@ def pairs_trade_monthly_with_risk(prices1, prices2, label1, label2,
                     'holding_months': holding,
                     'close_reason': reason
                 })
-                # reset position
                 position = 0
                 entry_spread = None
                 entry_date = None
                 entry_sigma = None
                 entry_index = None
+                entry_shares1 = None  # RESET
+                entry_shares2 = None  # RESET
                 holding = 0
                 df.at[date_t, 'action'] = f'EXIT_{reason.upper()}'
             else:
@@ -125,19 +124,21 @@ def pairs_trade_monthly_with_risk(prices1, prices2, label1, label2,
         df.at[date_t, 'z'] = z_t
         df.at[date_t, 'position'] = position
 
-    # End of sample: force-close any open trade at last price
-    if position != 0 and entry_spread is not None:
-        # use last available t (n-1)
+    # Forced liquidation: USE SHARES METHOD
+    if position != 0 and entry_index is not None:
         last_t = n - 1
-        y = df['p1'].iloc[:last_t]
-        x = df['p2'].iloc[:last_t]
+        
+        # Calculate PnL using shares (consistent with main loop)
+        pnl_dollars = entry_shares1 * (df['p1'].iat[last_t] - df['p1'].iat[entry_index]) \
+                    + entry_shares2 * (df['p2'].iat[last_t] - df['p2'].iat[entry_index])
+
+        # Recalculate spread for recording purposes
+        y = df['p1'].iloc[:last_t+1]
+        x = df['p2'].iloc[:last_t+1]
         X = sm.add_constant(x)
         model = sm.OLS(y, X).fit()
         beta = model.params[1]
         spread_last = df['p1'].iat[last_t] - beta * df['p2'].iat[last_t]
-        sigma_last = (y - beta * x).std(ddof=0) if (y - beta * x).std(ddof=0) > 0 else 1e-8
-        pnl_spread_units = (spread_last - entry_spread) * position
-        pnl_dollars = (pnl_spread_units / entry_sigma) * capital if entry_sigma is not None else (pnl_spread_units / sigma_last) * capital
 
         trades.append({
             'entry_date': entry_date,
@@ -150,11 +151,9 @@ def pairs_trade_monthly_with_risk(prices1, prices2, label1, label2,
             'close_reason': 'forced_liquidation_end_of_sample'
         })
 
-        # update final row
         df.at[df.index[last_t], 'pnl_unrealized'] = pnl_dollars
         df.at[df.index[last_t], 'action'] = 'FORCED_LIQUIDATION'
         df.at[df.index[last_t], 'position'] = 0
 
     trades_df = pd.DataFrame(trades)
     return df, trades_df
-    

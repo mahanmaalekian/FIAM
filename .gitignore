@@ -2,3 +2,4 @@ stocks.csv
 stocks.parquet
 .ipynb_checkpoints/*
 data/
+__pycache__/

@@ -22,14 +22,11 @@ import statsmodels.api as sm
 from sklearn.cluster import KMeans
 from kneed import KneeLocator
 
-# Reporting
 
 # Operating System
 import os
 import gc
 
-
-# In[30]:
 
 
 # Global Variables
@@ -41,7 +38,8 @@ load_coint_pairs = False
 
 
 # Helper Functions
-def calculate_cointegration(series_1, series_2):
+def calculate_cointegration(series_1, series_2, sig_level=0.05):
+    # Engle–Granger test
     coint_res = coint(series_1, series_2)
     coint_t, p_value, crit_values = coint_res
 
@@ -50,12 +48,48 @@ def calculate_cointegration(series_1, series_2):
     model = sm.OLS(series_1, X).fit()
     hedge_ratio = model.params[1]
 
-    # flag if cointegrated
-    # print(p_value, coint_t, crit_values[1])
-    coint_flag = 1 if (coint_t < crit_values[1]) and (p_value < 0.05) else 0
+    # cointegration flag (use both critical value + p-value check)
+    coint_flag = int((coint_t < crit_values[1]) and (p_value < sig_level))
     
-    return coint_flag, hedge_ratio
 
+    # define a "strength score" (lower p-value = stronger)
+    # you can also do something like (crit_values[1] - coint_t) for distance from threshold
+    score = -p_value  
+
+    return {
+        "flag": coint_flag,
+        "hedge_ratio": hedge_ratio,
+        "p_value": p_value,
+        "score": score
+    }
+
+
+def get_stock_returns_upto_year(year:int):
+    if not os.path.exists(os.path.join(
+        WORKING_DIR, CSV_FILENAME
+    )):
+    # read sample data
+        file_path = os.path.join(
+            WORKING_DIR, "ret_sample.csv"
+        )
+        data = pl.read_csv(file_path)
+        data = data.filter(pl.col("excntry").is_in(["CAN","USA"]))
+        # write the North American csv
+        data.write_csv(os.path.join(WORKING_DIR, CSV_FILENAME))
+
+    if not os.path.exists(os.path.join(
+        WORKING_DIR, PARQET_FILENAME
+        )):
+        # write the parquet file (more memory efficient)
+        data = pd.read_csv(os.path.join(WORKING_DIR, CSV_FILENAME), dtype={4: str})
+        data.to_parquet(PARQET_FILENAME, index=False, compression="snappy")
+
+    # read the parquet file
+    df_used_comps = pd.read_parquet(os.path.join(WORKING_DIR, PARQET_FILENAME))
+    year *= 10000
+    # only keep until the year we want
+    df_used_comps = df_used_comps[df_used_comps["date"] < year]
+    return df_used_comps[["date", "id", "stock_ret"]]
 
 def optimize_cointegration_testing_combined(clusters_clean, df_ret, 
                                            corr_threshold=0.6, 
@@ -90,11 +124,9 @@ def optimize_cointegration_testing_combined(clusters_clean, df_ret,
     print(f"After correlation filtering: {len(all_pairs_to_test)} pairs to test")
     return all_pairs_to_test
 
-
-
-
-def run_script(year: int):
-# ### Data Extraction
+def get_cointegrated_stocks_by_year(year: int):
+    """ returns a DataFrame of the cointegrated stocks up to the given year"""
+    # ### Data Extraction
 
     if not os.path.exists(os.path.join(
             WORKING_DIR, CSV_FILENAME
@@ -130,9 +162,15 @@ def run_script(year: int):
     df_used_comps = data[data["id"].isin(df_ids.values)]
     del data
     gc.collect()
-    year *= 10000
+    # Get companies that exist in the target year
+    companies_in_target_year = df_used_comps[df_used_comps['date'] // 10000 == year]['id'].unique()
+
+    # Keep only rows for companies that exist in target year
+    df_used_comps = df_used_comps[df_used_comps['id'].isin(companies_in_target_year)]
     # only keep until the year we want
+    year *= 10000
     df_used_comps = df_used_comps[df_used_comps["date"] < year]
+
 
 
     # get a df for just the returns for all companies
@@ -140,7 +178,8 @@ def run_script(year: int):
     df_ret = df_used_comps.pivot(index="date", columns="id", values="stock_ret")
     df_ret = df_ret.sort_index()
     df_ret.fillna(value=0, inplace=True)
-    df_ret = df_ret.cumsum()
+    initial_price = 100
+    df_ret = (1 + df_ret).cumprod() * initial_price
 
 
     # the features that we need for K-Means Clustering
@@ -216,18 +255,6 @@ def run_script(year: int):
 
 
     if not load_coint_pairs:
-        # Choose your strategy:
-        
-        # Fast but less comprehensive
-        # df_coint = optimize_cointegration_testing_v1(clusters_clean, df_ret, sample_size=5000)
-        
-        # Correlation-based filtering
-        # df_coint = optimize_cointegration_testing_v2(clusters_clean, df_ret, corr_threshold=0.7, max_pairs_per_cluster=100)
-        
-        # Representative selection
-        # df_coint = optimize_cointegration_testing_v3(clusters_clean, df_ret, n_representatives=50)
-        
-        # Recommended: Combined approach
         df_coint = optimize_cointegration_testing_combined(
             clusters_clean, df_ret, 
             corr_threshold=0.6, 
@@ -240,17 +267,22 @@ def run_script(year: int):
     for tup in df_coint:
         series_1 = df_ret[tup[0]].values.astype(float)
         series_2 = df_ret[tup[1]].values.astype(float)
-        coint_flag, _ = calculate_cointegration(series_1, series_2)
-        if coint_flag == 1:
-            # print("adding")
-            cointegrated_pairs.append({
-                "base asset": tup[0],
-                "compare asset": tup[1],
-                "label": tup[2]})
-        df_coint_new = pd.DataFrame(cointegrated_pairs).sort_values(by="label")
-        # df_coint.to_csv(file_name_coint)                              
+        temp = calculate_cointegration(series_1, series_2)
+        temp["base asset"] = tup[0]
+        temp["compare asset"] = tup[1]
+        cointegrated_pairs.append(temp)
+    df_coint_new = pd.DataFrame(cointegrated_pairs)
 
-    df_coint_csv = df_coint_new.iloc[:, 0:2]
-    df_coint_csv.to_csv("data/cointegrated-pairs.csv", index=False)
+    # rank the top 50 trades and return them
+    df_coint_new = df_coint_new[df_coint_new["flag"] == 1]
+
+    df_coint_new.sort_values(by="score")
+    df_coint_csv = df_coint_new.iloc[:, 4:]
+    df_coint_csv = df_coint_csv.iloc[:50]
+    df_coint_csv.to_csv(f"data/cointegrated-pairs-{int(year/10000)}.csv", index=False)
+    print(year/10000, "done")
     return df_coint_csv
+
+
+
 
