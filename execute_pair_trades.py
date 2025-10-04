@@ -62,6 +62,30 @@ for i in range(11):
 # remove the months that we did not end up executing
 df_combined = df_combined[df_combined["holding_months"] > 0]
 
+# Extract year from entry_date (integer -> string -> slice)
+df_combined["year"] = df_combined["entry_date"].astype(str).str[:4].astype(int)
+
+# Count how many rows per year
+count_per_year = df_combined.groupby("year").size().reset_index(name="count")
+
+# Convert to datetime
+df_combined["exit_date"] = pd.to_datetime(df_combined["exit_date"], format="%Y%m%d")
+
+# Extract year-month period
+df_combined["year_month"] = df_combined["exit_date"].dt.to_period("M")
+
+# Count trades per month
+count_per_month = df_combined.groupby("year_month").size().reset_index(name="count")
+
+# Create full monthly range
+full_range = pd.period_range(start=pd.to_datetime(20150130, format="%Y%m%d"), end=df_combined["exit_date"].max(), freq="M")
+full_df = pd.DataFrame({"year_month": full_range})
+
+# Merge and fill missing with 0
+count_per_month_full = full_df.merge(count_per_month, on="year_month", how="left").fillna(0)
+count_per_month_full["count"] = count_per_month_full["count"].astype(int)
+count_per_month_full.to_csv("pairs-trade-counts-per-month.csv")
+
 # create new df for mean of every month
 new_df = (
     df_combined.groupby("exit_date")["pnl_dollars"]
