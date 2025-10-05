@@ -1,1 +1,1 @@
-This directory will contain the csv files that are created and used by the different modules.
+This directory will contain the csv files that are created and used by the different modules once you run the main function in final_strategy.py
