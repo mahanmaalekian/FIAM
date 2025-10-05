@@ -1,3 +1,27 @@
+"""
+final_strategy.py
+--------------------
+This module implements a workflow for predicting stock returns using
+XGBoost models enhanced with HMM state features and text sentiment data.
+
+Functions:
+- main(): Executes the full workflow of:
+    - Loading and preprocessing stock data
+    - Generating yearly HMM states and initial XGBoost predictions
+    - Training XGBoost models per year with hyperparameter optimization
+    - Predicting next-year returns and computing monthly long-short portfolio returns
+    - Saving results and trained models to disk
+
+Data Sources:
+- Stock returns and fundamental data
+- HMM state CSVs per year
+- Sentiment data CSV
+
+Outputs:
+- Trained XGBoost models per year: 'data/final-strat-model-{year}.joblib'
+- Monthly long-short returns: 'final_results.csv'
+"""
+
 import joblib
 import pandas as pd
 import xgboost as xgb
@@ -34,11 +58,13 @@ def main():
         print(f"\n[{idx}/11] Processing year {year}...")
 
         # HMM
-        df_hmm = pd.read_csv(f"./data/{year}-hmm.csv")
+        df_hmm = pd.read_csv(f"./data/{year+1}-hmm.csv")
+
 
         # training data
         df_hmm_year = df_hmm[df_hmm["date"] >= year * 10000]
         # prediction data
+        
         df_hmm_next = df_hmm[df_hmm["date"] >= (year + 1) * 10000]
 
         # XGBOOST
@@ -177,6 +203,7 @@ def main():
         predictions = best_model.predict(X)
 
         test_mse = mean_squared_error(y, predictions)
+        print(test_mse)
 
         results_df = pd.DataFrame(
             {

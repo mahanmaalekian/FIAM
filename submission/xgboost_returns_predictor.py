@@ -96,8 +96,8 @@ def xgboost_predict_returns():
             "subsample": 0.8,
             "colsample_bytree": 0.8,
             "seed": 42,
-            "tree_method": "gpu_hist",  # 🚀 enables GPU acceleration
-            "predictor": "gpu_predictor",  # (optional) ensures GPU is used for prediction too
+            "tree_method": "gpu_hist",  # enables GPU acceleration
+            "predictor": "gpu_predictor",  # ensures GPU is used for prediction too
         }
 
         model = xgb.train(

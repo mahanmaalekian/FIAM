@@ -1,3 +1,11 @@
+"""
+metrics.py
+--------------------
+This module takes the 2 csv's: one containing the monthly returns from the main strategy and
+one containing the monthly returns from the pairs trading strategy, combines them into one overall strategy
+by doing a weighted average of returns based on how many stocks were traded each month in each strategy
+and finally calculates various Porfolio Performance Statistics for the overall strategy.
+"""
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as sm
@@ -67,8 +75,8 @@ monthly_portfolio = monthly_portfolio.merge(
 )
 monthly_portfolio["returns"] = (
     monthly_portfolio["returns"] * 200
-    + monthly_pairs["returns_pairs"] * pairs_trades_count["count"]
-) / (200 + pairs_trades_count["count"])
+    + monthly_pairs["returns_pairs"] * pairs_trades_count["count"] * 2
+) / (200 + pairs_trades_count["count"] * 2)
 
 
 # SHARPE RATIO

@@ -1,13 +1,41 @@
 """
 k_means_clusters.py
 --------------------
-This module takes stocks, puts them into clusters based on certain features using a K-Means Clustering
-model that is trained on all the previous years.
-It then finds the cointegration of pair-wise combinations based on their
-monthly returns in each cluster and saves the 50 most cointegrated
-stocks that are not "too cointegrated" into a csv that can later be used to perform pairs trading.
-The thresholds for cointegration are provided in the code.
+Pairs Trading and Cointegration Analysis Module
+
+This module provides functions to identify and analyze cointegrated stock pairs 
+for North American companies, using historical stock returns and financial features. 
+It combines statistical tests, clustering, and feature engineering to select 
+high-quality pairs for pairs trading strategies.
+
+Functions:
+- calculate_cointegration(series_1, series_2, sig_level=0.05):
+    Performs the Engle-Granger cointegration test between two time series, computes 
+    the hedge ratio, and returns a strength score and cointegration flag.
+
+- get_stock_returns_upto_year(year: int):
+    Loads and returns monthly stock returns for all companies up to the given year, 
+    using preprocessed parquet data.
+
+- optimize_cointegration_testing_combined(clusters_clean, df_ret, corr_threshold=0.6, max_pairs_per_cluster=100):
+    Filters stock clusters to select highly correlated pairs within clusters for 
+    cointegration testing.
+
+- get_cointegrated_stocks_by_year(year: int):
+    Identifies the top cointegrated stock pairs up to a specified year. 
+
+Data Sources:
+- Historical stock returns stored in parquet or CSV format.
+- Financial features for clustering and analysis.
+
+Outputs:
+- Top cointegrated pairs per year saved to CSV: 'data/cointegrated-pairs-{year}.csv'.
+
+Usage:
+- Import this module and call `get_cointegrated_stocks_by_year(year)` to obtain 
+  the top cointegrated pairs for trading strategies.
 """
+
 
 # Data Management
 import pandas as pd
@@ -44,13 +72,20 @@ load_coint_pairs = False
 
 def calculate_cointegration(series_1, series_2, sig_level=0.05):
     """
-    Loads and returns monthly stock returns for all North American companies up to the given year.
+    Perform Engle-Granger cointegration test between two time series and compute hedge ratio.
 
     Parameters:
-        year (int): The final year (inclusive) up to which data is returned.
+    - series_1, series_2: pd.Series
+        The two time series to test for cointegration.
+    - sig_level: float, optional (default=0.05)
+        Significance level for the cointegration test.
 
     Returns:
-        pd.DataFrame: DataFrame containing columns ['date', 'id', 'stock_ret'].
+    dict with:
+    - 'flag': int, 1 if series are cointegrated at given significance, 0 otherwise
+    - 'hedge_ratio': float, OLS slope coefficient for series_2 predicting series_1
+    - 'p_value': float, p-value of the cointegration test
+    - 'score': float, strength score (-p_value; lower p-value = stronger cointegration)
     """
     # Engle–Granger test
     coint_res = coint(series_1, series_2)
@@ -66,7 +101,6 @@ def calculate_cointegration(series_1, series_2, sig_level=0.05):
     
 
     # define a "strength score" (lower p-value = stronger)
-    # you can also do something like (crit_values[1] - coint_t) for distance from threshold
     score = -p_value  
 
     return {
@@ -79,7 +113,13 @@ def calculate_cointegration(series_1, series_2, sig_level=0.05):
 
 def get_stock_returns_upto_year(year:int):
     """
-    Returns a pandas dataframe with the returns per month of all North American Companies
+    Loads and returns monthly stock returns for all North American companies up to the given year.
+
+    Parameters:
+        year (int): The final year (inclusive) up to which data is returned.
+
+    Returns:
+        pd.DataFrame: DataFrame containing columns ['date', 'id', 'stock_ret'].
     """
     load_data_to_parquet()
 
@@ -118,7 +158,7 @@ def optimize_cointegration_testing_combined(clusters_clean, df_ret,
         
         high_corr_pairs = []
         for i, asset1 in enumerate(cluster_assets):
-            for j, asset2 in enumerate(cluster_assets[i+1:], i+1):
+            for _, asset2 in enumerate(cluster_assets[i+1:], i+1):
                 corr_val = abs(corr_matrix.loc[asset1, asset2])
                 if corr_val > corr_threshold:
                     high_corr_pairs.append((asset1, asset2, corr_val, label))
@@ -151,26 +191,10 @@ def get_cointegrated_stocks_by_year(year: int):
     Returns:
         pd.DataFrame: Top 50 cointegrated stock pairs with their statistics.
     """
-    # ### Data Extraction
 
-    if not os.path.exists(os.path.join(
-            WORKING_DIR, CSV_FILENAME
-        )):
-        # read sample data
-        file_path = os.path.join(
-            WORKING_DIR, "ret_sample.csv"
-        )
-        data = pl.read_csv(file_path)
-        data = data.filter(pl.col("excntry").is_in(["CAN","USA"]))
-        # write the North American csv
-        data.write_csv(os.path.join(WORKING_DIR, CSV_FILENAME))
+    # Data extraction
+    load_data_to_parquet()
 
-    if not os.path.exists(os.path.join(
-        WORKING_DIR, PARQET_FILENAME
-        )):
-        # write the parquet file (more memory efficient)
-        data = pd.read_csv(os.path.join(WORKING_DIR, CSV_FILENAME), dtype={4: str})
-        data.to_parquet(PARQET_FILENAME, index=False, compression="snappy")
 
     # read the parquet file
     data = pd.read_parquet(os.path.join(WORKING_DIR, PARQET_FILENAME))
@@ -236,7 +260,6 @@ def get_cointegrated_stocks_by_year(year: int):
 
     #  Feature Scaling
 
-
     non_scalable = df_kmeans[["id", "country_USA", "country_CAN"]].copy()
     scalable = df_kmeans.drop(columns=["id", "country_USA", "country_CAN"])
 
@@ -246,6 +269,7 @@ def get_cointegrated_stocks_by_year(year: int):
     df_kmeans_scaled = pd.concat([df_kmeans_scaled, non_scalable], axis=1)
     df_kmeans_scaled = df_kmeans_scaled.set_index('id')
 
+    # Our machines had limited RAM so we have to manually garbage collect
     del df_kmeans
     gc.collect()
 
@@ -253,19 +277,22 @@ def get_cointegrated_stocks_by_year(year: int):
 
     #  K-Means Clustering
 
-    # Find the optpimum number of clusters
+    # Find the optimum number of clusters
     X = df_kmeans_scaled.copy()
     K = range(1, 20)
     distortions = []
+
+    # find the distortions for different cluster numbers (1-20)
     for k in K:
         kmeans = KMeans(n_clusters=k)
         kmeans.fit(X)
         distortions.append(kmeans.inertia_)
 
     kl = KneeLocator(K,distortions, curve="convex", direction="decreasing")
+
+    # use elbow method to find optimum number of clusters
     c = kl.elbow
     print("Optimum Clusters:", c)
-
 
 
     # Fit K-Means Model
@@ -278,7 +305,7 @@ def get_cointegrated_stocks_by_year(year: int):
     clusters_clean = clustered_series[clustered_series != -1]
 
 
-
+    # Get the highly correlated stock pairs for pairs trading
     if not load_coint_pairs:
         df_coint = optimize_cointegration_testing_combined(
             clusters_clean, df_ret, 
