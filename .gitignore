@@ -1,5 +1,5 @@
 stocks.csv
 stocks.parquet
 .ipynb_checkpoints/*
-data/
+./data/
 __pycache__/
