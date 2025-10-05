@@ -39,10 +39,6 @@ Usage:
 
 # Data Management
 import pandas as pd
-import numpy as np
-import polars as pl
-import pyarrow as pa
-from data_loader import load_data_to_parquet
 
 # Feature Engineering
 from sklearn.preprocessing import StandardScaler
@@ -66,8 +62,6 @@ import gc
 CSV_FILENAME = "stocks.csv"
 PARQET_FILENAME = "stocks.parquet"
 WORKING_DIR = "data/"
-FEATURES = ["gvkey"]
-load_coint_pairs = False
 
 
 def calculate_cointegration(series_1, series_2, sig_level=0.05):
@@ -121,7 +115,6 @@ def get_stock_returns_upto_year(year:int):
     Returns:
         pd.DataFrame: DataFrame containing columns ['date', 'id', 'stock_ret'].
     """
-    load_data_to_parquet()
 
     # read the parquet file
     df_used_comps = pd.read_parquet(os.path.join(WORKING_DIR, PARQET_FILENAME))
@@ -191,9 +184,6 @@ def get_cointegrated_stocks_by_year(year: int):
     Returns:
         pd.DataFrame: Top 50 cointegrated stock pairs with their statistics.
     """
-
-    # Data extraction
-    load_data_to_parquet()
 
 
     # read the parquet file
@@ -306,12 +296,11 @@ def get_cointegrated_stocks_by_year(year: int):
 
 
     # Get the highly correlated stock pairs for pairs trading
-    if not load_coint_pairs:
-        df_coint = optimize_cointegration_testing_combined(
-            clusters_clean, df_ret, 
-            corr_threshold=0.6, 
-            max_pairs_per_cluster=100,
-        )
+    df_coint = optimize_cointegration_testing_combined(
+        clusters_clean, df_ret, 
+        corr_threshold=0.6, 
+        max_pairs_per_cluster=100,
+    )
 
 
     # Loop through and calculate cointegrate pairs

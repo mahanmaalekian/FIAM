@@ -1,4 +1,3 @@
-
 """
 pairs_trading.py
 --------------------
@@ -60,8 +59,8 @@ def pairs_trade_monthly_with_risk(
     """
 
 
-    df = pd.DataFrame({"p1": prices1, "p2": prices2}).dropna().copy()
-    n = len(df)
+    df_prices = pd.DataFrame({"p1": prices1, "p2": prices2}).dropna().copy()
+    n = len(df_prices)
     if n < lookback + 1:
         raise ValueError("Not enough data for lookback")
 
@@ -75,13 +74,13 @@ def pairs_trade_monthly_with_risk(
     holding = 0
 
     # Pre-allocate columns
-    df["z"] = np.nan
-    df["action"] = ""
-    df["position"] = 0
-    df["pnl_unrealized"] = 0.0
+    df_prices["z"] = np.nan
+    df_prices["action"] = ""
+    df_prices["position"] = 0
+    df_prices["pnl_unrealized"] = 0.0
 
     for t in range(lookback, n):
-        hist = df.iloc[:t]
+        hist = df_prices.iloc[:t]
         y = hist["p1"]
         x = hist["p2"]
         X = sm.add_constant(x)
@@ -92,55 +91,57 @@ def pairs_trade_monthly_with_risk(
         mu = spread_hist.mean()
         sigma = spread_hist.std(ddof=0) if spread_hist.std(ddof=0) > 0 else 1e-8
 
-        spread_t = df["p1"].iat[t] - beta * df["p2"].iat[t]
+        spread_t = df_prices["p1"].iat[t] - beta * df_prices["p2"].iat[t]
         z_t = (spread_t - mu) / sigma
-        date_t = df.index[t]
+        date_t = df_prices.index[t]
 
         reason = None
         pnl_dollars = 0.0
 
+        # if we are currently not holding, we will try to make a trade
         if position == 0:
             if z_t > entry:
                 position = -1
                 entry_spread = spread_t
-                entry_sigma = sigma
                 entry_date = date_t
                 entry_index = t
                 holding = 0
-                entry_shares1 = -capital / df["p1"].iat[t]  # STORE
-                entry_shares2 = +beta * capital / df["p2"].iat[t]  # STORE
-                df.at[date_t, "action"] = "ENTER_SHORT"
+                entry_shares1 = -capital / df_prices["p1"].iat[t]  # STORE
+                entry_shares2 = +beta * capital / df_prices["p2"].iat[t]  # STORE
+                df_prices.at[date_t, "action"] = "ENTER_SHORT"
             elif z_t < -entry:
                 position = +1
                 entry_spread = spread_t
-                entry_sigma = sigma
                 entry_date = date_t
                 entry_index = t
                 holding = 0
-                entry_shares1 = +capital / df["p1"].iat[t]  # STORE
-                entry_shares2 = -beta * capital / df["p2"].iat[t]  # STORE
-                df.at[date_t, "action"] = "ENTER_LONG"
+                entry_shares1 = +capital / df_prices["p1"].iat[t]  # STORE
+                entry_shares2 = -beta * capital / df_prices["p2"].iat[t]  # STORE
+                df_prices.at[date_t, "action"] = "ENTER_LONG"
             else:
-                df.at[date_t, "action"] = "HOLD"
+                df_prices.at[date_t, "action"] = "HOLD"
         else:
             # Use stored shares
             pnl_dollars = entry_shares1 * (
-                df["p1"].iat[t] - df["p1"].iat[entry_index]
-            ) + entry_shares2 * (df["p2"].iat[t] - df["p2"].iat[entry_index])
+                df_prices["p1"].iat[t] - df_prices["p1"].iat[entry_index]
+            ) + entry_shares2 * (df_prices["p2"].iat[t] - df_prices["p2"].iat[entry_index])
 
-            df.at[date_t, "pnl_unrealized"] = pnl_dollars
+            df_prices.at[date_t, "pnl_unrealized"] = pnl_dollars
 
             holding += 1
-
+            # we haev reached the exit threshold, so we can execute the trade
             if abs(z_t) < exit:
                 reason = "z_cross"
+            # our loss is getting too much, let's precautiously execute the trade now
             elif pnl_dollars < -stop_loss_pct * capital:
                 reason = "stop_loss"
+            # we have held for too long now, let's execute the trade
             elif holding >= max_holding:
                 reason = "max_holding"
             else:
                 reason = None
 
+            # if we executed the treade, add it to the list of trades
             if reason is not None:
                 exit_spread = spread_t
                 exit_date = date_t
@@ -159,39 +160,38 @@ def pairs_trade_monthly_with_risk(
                 position = 0
                 entry_spread = None
                 entry_date = None
-                entry_sigma = None
                 entry_index = None
                 entry_shares1 = None  # RESET
                 entry_shares2 = None  # RESET
                 holding = 0
-                df.at[date_t, "action"] = f"EXIT_{reason.upper()}"
+                df_prices.at[date_t, "action"] = f"EXIT_{reason.upper()}"
             else:
-                df.at[date_t, "action"] = "HOLD"
+                df_prices.at[date_t, "action"] = "HOLD"
 
-        df.at[date_t, "z"] = z_t
-        df.at[date_t, "position"] = position
+        df_prices.at[date_t, "z"] = z_t
+        df_prices.at[date_t, "position"] = position
 
-    # Forced liquidation: USE SHARES METHOD
+    # Forced liquidation:
     if position != 0 and entry_index is not None:
         last_t = n - 1
 
         # Calculate PnL using shares (consistent with main loop)
         pnl_dollars = entry_shares1 * (
-            df["p1"].iat[last_t] - df["p1"].iat[entry_index]
-        ) + entry_shares2 * (df["p2"].iat[last_t] - df["p2"].iat[entry_index])
+            df_prices["p1"].iat[last_t] - df_prices["p1"].iat[entry_index]
+        ) + entry_shares2 * (df_prices["p2"].iat[last_t] - df_prices["p2"].iat[entry_index])
 
         # Recalculate spread for recording purposes
-        y = df["p1"].iloc[: last_t + 1]
-        x = df["p2"].iloc[: last_t + 1]
+        y = df_prices["p1"].iloc[: last_t + 1]
+        x = df_prices["p2"].iloc[: last_t + 1]
         X = sm.add_constant(x)
         model = sm.OLS(y, X).fit()
         beta = model.params[1]
-        spread_last = df["p1"].iat[last_t] - beta * df["p2"].iat[last_t]
+        spread_last = df_prices["p1"].iat[last_t] - beta * df_prices["p2"].iat[last_t]
 
         trades.append(
             {
                 "entry_date": entry_date,
-                "exit_date": df.index[last_t],
+                "exit_date": df_prices.index[last_t],
                 "direction": "LONG" if position == 1 else "SHORT",
                 "entry_spread": entry_spread,
                 "exit_spread": spread_last,
@@ -201,12 +201,12 @@ def pairs_trade_monthly_with_risk(
             }
         )
 
-        df.at[df.index[last_t], "pnl_unrealized"] = pnl_dollars
-        df.at[df.index[last_t], "action"] = "FORCED_LIQUIDATION"
-        df.at[df.index[last_t], "position"] = 0
+        df_prices.at[df_prices.index[last_t], "pnl_unrealized"] = pnl_dollars
+        df_prices.at[df_prices.index[last_t], "action"] = "FORCED_LIQUIDATION"
+        df_prices.at[df_prices.index[last_t], "position"] = 0
 
     trades_df = pd.DataFrame(trades)
-    return df, trades_df
+    return df_prices, trades_df
 
 
 def execute_all_pairs_trades():
@@ -225,28 +225,30 @@ def execute_all_pairs_trades():
     - 'pairs-trade-counts-per-month.csv': number of trades closed per month
     - 'pair-trade-per-month.csv': average PnL per exit date
     """
+    # find all the cointegrated stocks per year (this function will auto save it as a csv)
     year = 2015
     for i in range(11):
         get_cointegrated_stocks_by_year(year + i)
     df_combined = pd.DataFrame()
     year = 2015
+
+    # get returns for all years
     df_returns = get_stock_returns_upto_year(2026)
+
+    # execute the pairs trades for each year in the OOS period
     for i in range(11):
         cointegrated_pairs_path = f"data/cointegrated-pairs-{year + i}.csv"
-        if not os.path.exists(cointegrated_pairs_path):
-            df_cointegrated_pairs = get_cointegrated_stocks_by_year(year)
-        else:
-            df_cointegrated_pairs = pd.read_csv(cointegrated_pairs_path)
+        df_cointegrated_pairs = pd.read_csv(cointegrated_pairs_path)
 
+        # make the trades for all the cointegrated pairs of that year
         for j in range(len(df_cointegrated_pairs)):
             stock1_label = df_cointegrated_pairs.iloc[j, 0]
             stock2_label = df_cointegrated_pairs.iloc[j, 1]
             series1 = df_returns[df_returns["id"] == stock1_label].copy()
             series2 = df_returns[df_returns["id"] == stock2_label].copy()
-            series1["price_index"] = (1 + series1["stock_ret"]).cumprod() * 1
-            series2["price_index"] = (1 + series2["stock_ret"]).cumprod() * 1
+            series1["price_index"] = (1 + series1["stock_ret"]).cumprod()
+            series2["price_index"] = (1 + series2["stock_ret"]).cumprod()
 
-            len(series1["stock_ret"].dropna())
             # Find the first index where date >= 20150000
             first_idx = series1[series1["date"] >= (year + i) * 10000].index[0]
 
@@ -267,13 +269,13 @@ def execute_all_pairs_trades():
             series2 = series2.iloc[max(0, pos - 6) :]
             series2 = series2[series2["date"] < (year + i + 1) * 10000]
             try:
-                temp, temp2 = tp.pairs_trade_monthly_with_risk(
+                _, trades_per_pair = pairs_trade_monthly_with_risk(
                     series1.set_index("date")["price_index"],
                     series2.set_index("date")["price_index"],
                     stock1_label,
                     stock2_label,
                 )
-                df_combined = pd.concat([df_combined, temp2], ignore_index=True)
+                df_combined = pd.concat([df_combined, trades_per_pair], ignore_index=True)
             except:
                 print("skip pair")
         print(year + i, "done")
@@ -313,4 +315,3 @@ def execute_all_pairs_trades():
         .reset_index(name="avg_pnl_dollars")
     )
     new_df.to_csv("pair-trade-per-month.csv")
-    execute_all_pairs_trades()

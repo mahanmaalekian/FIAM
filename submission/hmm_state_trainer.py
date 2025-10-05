@@ -22,7 +22,7 @@ def create_hmm_states_per_year():
 
     This function loads financial data from 'data/stocks.parquet', cleans and scales it,
     and fits an HMM using up to the previous 10 years of data for each year after 2014.
-    The predicted hidden market states are saved to CSV files in the 'hmm/' directory,
+    The predicted hidden market states are saved to CSV files in the 'data/' directory,
     one file per year.
 
     Process overview:
@@ -32,7 +32,7 @@ def create_hmm_states_per_year():
     3. For each year (starting from 2015):
         - Train an HMM on up to 10 years of past data.
         - Predict hidden states for the current year.
-        - Save the results as 'hmm/{year}.csv'.
+        - Save the results as 'data/{year}.csv'.
 
     Notes
     -----
@@ -42,7 +42,7 @@ def create_hmm_states_per_year():
     Returns
     -------
     None
-        The function writes output CSV files to the 'hmm/' folder.
+        The function writes output CSV files to the 'data/' folder.
     """
     # Load data
     data = pd.read_parquet("data/stocks.parquet")
@@ -129,4 +129,4 @@ def create_hmm_states_per_year():
             hidden_states  # Assign all hidden states, not just hidden_states[0]
         )
         ret = ret[["gvkey", "hmm_state", "date"]]
-        ret.to_csv(f"hmm/{yr}.csv")
+        ret.to_csv(f"data/{yr}.csv")

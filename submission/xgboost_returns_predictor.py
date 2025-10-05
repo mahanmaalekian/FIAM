@@ -44,7 +44,7 @@ def xgboost_predict_returns():
     None
         Writes the full prediction DataFrame to 'data/xgboost_results.csv'.
     """
-    df = pd.read_parquet("stocks.parquet")
+    df = pd.read_parquet("data/stocks.parquet")
 
     df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")
 

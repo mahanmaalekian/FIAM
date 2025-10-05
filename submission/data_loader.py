@@ -53,5 +53,4 @@ def load_data_to_parquet():
         )):
         # write the parquet file (more memory efficient)
         data = pd.read_csv(os.path.join(DATA_DIR, NA_CSV_FILENAME), dtype={4: str})
-        data.to_parquet(PARQET_FILENAME, index=False, compression="snappy")
-        
+        data.to_parquet(os.path.join(DATA_DIR, PARQET_FILENAME), index=False, compression="snappy")
