@@ -6,6 +6,7 @@ one containing the monthly returns from the pairs trading strategy, combines the
 by doing a weighted average of returns based on how many stocks were traded each month in each strategy
 and finally calculates various Porfolio Performance Statistics for the overall strategy.
 """
+
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as sm
@@ -132,3 +133,69 @@ rolling_peak = monthly_portfolio["cumsum_log_returns"].cummax()
 drawdowns = rolling_peak - monthly_portfolio["cumsum_log_returns"]
 max_drawdown = drawdowns.max()
 print("Maximum Drawdown:", max_drawdown)
+
+from collections import Counter, defaultdict
+
+# Load all results from predictions (for holdings info)
+ALL_RESULTS_PATH = "actual_pred_per_stock.csv"  # <-- make sure this file exists
+all_results = pd.read_csv(ALL_RESULTS_PATH, parse_dates=["date"])
+
+top_holdings_counter = Counter()
+profit_contributions = defaultdict(float)
+turnover_list = []
+turnover_by_date = {}
+prev_holdings = set()
+
+# Iterate through each month in the dataset
+for year in sorted(all_results["date"].dt.year.unique()):
+    for month in range(1, 13):
+        filtered = all_results[
+            (all_results["date"].dt.year == year)
+            & (all_results["date"].dt.month == month)
+        ]
+        if filtered.empty:
+            continue
+
+        # Sort by predicted return to identify top (long) positions
+        filtered = filtered.sort_values(by="predicted_values")
+
+        # Top 100 = long positions
+        most_positive = filtered.tail(100)
+        current_holdings = set(most_positive["gvkey"])
+
+        # Update appearance counter
+        top_holdings_counter.update(most_positive["gvkey"])
+
+        # Record realized profit contribution for each gvkey
+        for _, row in most_positive.iterrows():
+            profit_contributions[row["gvkey"]] += row["actual_values"]
+
+        # Calculate monthly portfolio turnover (fraction of holdings replaced)
+        if prev_holdings:
+            overlap = len(current_holdings & prev_holdings)
+            turnover = 1 - (overlap / len(current_holdings))
+            turnover_list.append(turnover)
+            date = pd.Timestamp(year=year, month=month, day=1)
+            turnover_by_date[date] = turnover
+
+        prev_holdings = current_holdings
+
+# --- Results Summary ---
+print("\n--- Portfolio Holdings and Turnover Analysis ---")
+
+# Top 10 most frequently held stocks
+top_10_holdings = top_holdings_counter.most_common(10)
+print("\nTop 10 Holdings (by frequency of appearance):")
+for i, (gvkey, count) in enumerate(top_10_holdings, start=1):
+    print(f"{i}. gvkey: {gvkey}, months held: {count}")
+
+# Top 10 most profitable stocks
+sorted_profit = sorted(profit_contributions.items(), key=lambda x: x[1], reverse=True)
+top_10_profitable = sorted_profit[:10]
+print("\nTop 10 Most Profitable Stocks (by cumulative actual return):")
+for i, (gvkey, total_profit) in enumerate(top_10_profitable, start=1):
+    print(f"{i}. gvkey: {gvkey}, cumulative contribution: {total_profit:.4f}")
+
+# Average monthly turnover
+avg_turnover = sum(turnover_list) / len(turnover_list)
+print(f"\nAverage Monthly Portfolio Turnover: {avg_turnover:.2%}")
