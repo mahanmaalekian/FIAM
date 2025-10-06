@@ -199,3 +199,47 @@ for i, (gvkey, total_profit) in enumerate(top_10_profitable, start=1):
 # Average monthly turnover
 avg_turnover = sum(turnover_list) / len(turnover_list)
 print(f"\nAverage Monthly Portfolio Turnover: {avg_turnover:.2%}")
+
+"""
+This section analyzes which fundamental features contributed most to the
+portfolio's performance by examining the gain-based feature importances
+from all yearly XGBoost models.
+"""
+
+import joblib
+import os
+import xgboost as xgb
+
+feature_importances = []
+
+# Loop through all saved yearly models
+for year in range(2014, 2025):
+    # Put correct path for model
+    model_path = f"data/mod-final-strat-model-{year}.joblib"
+    if not os.path.exists(model_path):
+        continue
+
+    # Load XGBoost model
+    model = joblib.load(model_path)
+
+    # Extract feature importance (gain = contribution to model accuracy)
+    importance_dict = model.get_booster().get_score(importance_type="gain")
+    importance_df = pd.DataFrame(
+        list(importance_dict.items()), columns=["feature", "importance"]
+    )
+    importance_df["year"] = year
+    feature_importances.append(importance_df)
+
+# Combine all years into a single DataFrame
+importance_all = pd.concat(feature_importances, ignore_index=True)
+
+# Calculate average importance across all years and sort descending
+avg_importance = (
+    importance_all.groupby("feature")["importance"].mean().sort_values(ascending=False)
+)
+
+# Display top 10 features
+top_features = avg_importance.head(10)
+print("\n--- Main Fundamental Signals Contributing to Portfolio Performance ---")
+for i, (feature, score) in enumerate(top_features.items(), start=1):
+    print(f"{i}. {feature}: {score:.4f}")
