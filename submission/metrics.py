@@ -243,3 +243,24 @@ top_features = avg_importance.head(10)
 print("\n--- Main Fundamental Signals Contributing to Portfolio Performance ---")
 for i, (feature, score) in enumerate(top_features.items(), start=1):
     print(f"{i}. {feature}: {score:.4f}")
+
+
+"""
+This section computes the predictive accuracy of the strategy:
+- Overall OOS R² across all years.
+- Yearly OOS R² for a more granular view of model performance.
+"""
+
+from sklearn.metrics import r2_score
+
+# Ensure 'all_results' DataFrame is loaded (contains 'actual_values' and 'predicted_values')
+# Overall OOS R² across all years
+oos_r2_overall = r2_score(all_results["actual_values"], all_results["predicted_values"])
+print(f"\nOverall Out-of-Sample R²: {oos_r2_overall:.4f}")
+
+# OOS R² per year
+oos_r2_per_year = all_results.groupby(all_results["date"].dt.year).apply(
+    lambda g: r2_score(g["actual_values"], g["predicted_values"])
+)
+print("\nYearly Out-of-Sample R²:")
+print(oos_r2_per_year)
